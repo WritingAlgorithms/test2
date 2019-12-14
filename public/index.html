@@ -1,0 +1,199 @@
+<html>
+  <head>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pixi.js/5.1.1/pixi.min.js"></script>
+    <script src="/socket.io/socket.io.js"></script>
+  </head>
+  <body>
+    <script>
+      var state;
+      var  tracks = PIXI.Sprite.fromImage('PNG/Tanks/tracksSmall.png');
+      tracks.zIndex = 0;
+      tracks.anchor.set(1.0, 0.5);
+      var moving = false;
+      var trackProducerInterval = null;
+      var wasPressEvent = false;
+      var tank_payload = { x: 320, y: 180, rotation: 0 };
+      var clientId = null;
+      var clientState = {};
+    
+      function setPlayerState(playerId, xpos, ypos, rot) {
+        clientState[playerId].x = xpos;
+        clientState[playerId].y = ypos;
+        clientState[playerId].rotation = rot;
+      }
+
+      var app = new PIXI.Application({width: 640, height: 360});
+      document.body.appendChild(app.view);
+      var socket = io();
+      
+      socket.emit('updateServer', tank_payload);
+
+      socket.on('connect', function() {
+        clientId = "/#" + socket.id;
+        clientState[clientId] = new PIXI.Sprite.from('PNG/Tanks/tankGreen.png');
+        clientState[clientId].anchor.set(0.5);
+        clientState[clientId].x = app.screen.width / 2;
+        clientState[clientId].y = app.screen.height / 2;
+        clientState[clientId].rotation = 0;
+        app.stage.addChild(clientState[clientId]);
+    app.stage.addChild(tracks);
+        console.log("Connected. Client ID - " + clientId);
+        console.log(clientState);
+        state = play;
+        app.ticker.add(delta => gameLoop(delta));
+      });
+
+      socket.on('updateClient', function(state_data) {
+        if (socket.connected) {
+        var xpos, ypos, rot;
+        for (var playerId in state_data) {
+          xpos = state_data[playerId].x;
+          ypos = state_data[playerId].y;
+          rot = state_data[playerId].rotation;
+
+          if (clientState.hasOwnProperty(playerId)) { // playerId already in state_data, and also in clientState
+            setPlayerState(playerId, xpos, ypos, rot);
+          } else if (!clientState.hasOwnProperty(playerId)) { // playerId already in state_data, but not in clientState
+            clientState[playerId] = new PIXI.Sprite.from('PNG/Tanks/tankBlue.png');
+            clientState[playerId].anchor.set(0.5);
+            setPlayerState(playerId, xpos, ypos, rot);
+            //clientState[playerId].x = xpos; clientState[playerId].y = ypos; clientState[playerId].rotation = rot;
+            app.stage.addChild(clientState[playerId]);
+          }
+        }
+
+        if (Object.keys(clientState).length > Object.keys(state_data).length) { // playerId in clientState but not in state_data
+          // when clientState has key but state_data does not, then client probably disconnected
+          for (var playerId in clientState) { 
+            if (!state_data.hasOwnProperty(playerId)) {
+              app.stage.removeChild(clientState[playerId]);
+              delete clientState[playerId];
+            }
+          }
+        }
+      }
+        //console.log(clientState); 
+      });
+
+
+      function gameLoop(delta) {
+        state(delta);
+      }
+
+      function play(delta) {
+        if (left.isDown && !right.isDown) {
+            //tank.rotation -= 0.07 * delta;
+            tank_payload.rotation = clientState[clientId].rotation - (0.07 * delta);
+            wasPressEvent = true;
+        }
+        if (right.isDown && !left.isDown) {
+            //tank.rotation += 0.07 * delta;
+            tank_payload.rotation = clientState[clientId].rotation + (0.07 * delta);
+            wasPressEvent = true;
+        }
+        if (up.isDown) {
+            //tank.x = tank.x + 6 * Math.cos(tank.rotation);
+            //tank.y = tank.y + 6 * Math.sin(tank.rotation);
+            tank_payload.x = clientState[clientId].x + 6 * Math.cos(tank_payload.rotation);
+            tank_payload.y = clientState[clientId].y + 6 * Math.sin(tank_payload.rotation);
+            wasPressEvent = true;
+
+            if (moving == false) {
+              app.stage.addChild(tracks);
+              trackProducerInterval = setInterval(function() {
+                app.stage.removeChild(tracks);
+                tracks.x = tank_payload.x;
+                tracks.y = tank_payload.y;
+                tracks.rotation = tank_payload.rotation;
+                app.stage.addChild(tracks);
+              }, 50);
+            }
+            moving = true;
+        }
+
+        if (up.isUp) {
+          moving = false;
+          clearInterval(trackProducerInterval);
+          trackProducerInterval = null;
+        }
+
+       
+        if (wasPressEvent) { socket.emit('updateServer', tank_payload); wasPressEvent = false; }
+      }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+      function keyboard(value, enableHeld=true) {
+        let key = {};
+        key.value = value;
+        key.isDown = false;
+        key.isUp = true;
+        key.press = undefined;
+        key.release = undefined;
+
+        key.downHandler = event => {
+            if (event.key === key.value) {
+                if (key.isUp && key.press) { key.press(); }
+                if (key.isDown && enableHeld) { key.press(); } 
+                key.isDown = true;
+                key.isUp = false;
+                event.preventDefault();
+            }
+        };
+
+        //The `upHandler`
+        key.upHandler = event => {
+            if (event.key === key.value) {
+                if (key.isDown && key.release) { key.release(); }
+                key.isDown = false;
+                key.isUp = true;
+                event.preventDefault();
+            }    
+        };
+
+        //Attach event listeners
+        const downListener = key.downHandler.bind(key);
+        const upListener = key.upHandler.bind(key);
+  
+        window.addEventListener(
+            "keydown", downListener, false
+        );
+        window.addEventListener(
+            "keyup", upListener, false
+        );
+  
+        // Detach event listeners
+        key.unsubscribe = () => {
+            window.removeEventListener("keydown", downListener);
+            window.removeEventListener("keyup", upListener);
+        };
+  
+        return key;
+    }
+
+      /*console.log(tank.x);
+      console.log(tank.y);
+      console.log(tank.rotation);
+      console.log(app.stage.children);
+      console.log(app.stage.children[0]);*/
+
+    var left = keyboard("ArrowLeft"); left.press = () => {};
+    var right = keyboard("ArrowRight"); right.press = () => {};
+    var up = keyboard("ArrowUp"); up.press = () => {};
+
+
+     
+    </script>
+  </body>
+</html>
